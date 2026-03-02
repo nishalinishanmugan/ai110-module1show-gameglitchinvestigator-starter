@@ -57,7 +57,7 @@ In logic_utils.py
 ## 📸 Demo
 
 - [X] [Insert a screenshot of your fixed, winning game here]
-![alt text](image.png)
+![alt text](image-3.png)
 
 
 ## 🚀 Stretch Features
