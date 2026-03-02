@@ -1,68 +1,25 @@
 import random
 import streamlit as st
+from logic_utils import get_range_for_difficulty, parse_guess, check_guess, update_score
 
-def get_range_for_difficulty(difficulty: str):
-    if difficulty == "Easy":
-        return 1, 20
-    if difficulty == "Normal":
-        return 1, 100
-    if difficulty == "Hard":
-        return 1, 50
-    return 1, 100
+def hot_cold_label(guess: int, secret: int) -> str:
+    diff = abs(guess - secret)
+    if diff == 0:
+        return "🎯 Perfect!"
+    if diff <= 3:
+        return "🔥 Hot"
+    if diff <= 10:
+        return "🌤️ Warm"
+    return "❄️ Cold"
 
-
-def parse_guess(raw: str):
-    if raw is None:
-        return False, None, "Enter a guess."
-
-    if raw == "":
-        return False, None, "Enter a guess."
-
-    try:
-        if "." in raw:
-            value = int(float(raw))
-        else:
-            value = int(raw)
-    except Exception:
-        return False, None, "That is not a number."
-
-    return True, value, None
-
-
-def check_guess(guess, secret):
-    if guess == secret:
-        return "Win", "🎉 Correct!"
-
-    try:
-        if guess > secret:
-            return "Too High", "📈 Go HIGHER!"
-        else:
-            return "Too Low", "📉 Go LOWER!"
-    except TypeError:
-        g = str(guess)
-        if g == secret:
-            return "Win", "🎉 Correct!"
-        if g > secret:
-            return "Too High", "📈 Go HIGHER!"
-        return "Too Low", "📉 Go LOWER!"
-
-
-def update_score(current_score: int, outcome: str, attempt_number: int):
-    if outcome == "Win":
-        points = 100 - 10 * (attempt_number + 1)
-        if points < 10:
-            points = 10
-        return current_score + points
-
-    if outcome == "Too High":
-        if attempt_number % 2 == 0:
-            return current_score + 5
-        return current_score - 5
-
-    if outcome == "Too Low":
-        return current_score - 5
-
-    return current_score
+def closeness_emoji(diff: int) -> str:
+    if diff == 0:
+        return "🎯"
+    if diff <= 3:
+        return "🔥"
+    if diff <= 10:
+        return "🌤️"
+    return "❄️"
 
 st.set_page_config(page_title="Glitchy Guesser", page_icon="🎮")
 
@@ -89,11 +46,21 @@ low, high = get_range_for_difficulty(difficulty)
 st.sidebar.caption(f"Range: {low} to {high}")
 st.sidebar.caption(f"Attempts allowed: {attempt_limit}")
 
-if "secret" not in st.session_state:
-    st.session_state.secret = random.randint(low, high)
+#FIXME: The game doesn't reset when changing difficulty. I added a check to reset the game when the difficulty changes.
+if "difficulty" not in st.session_state:
+    st.session_state.difficulty = difficulty
 
+if "secret" not in st.session_state or st.session_state.difficulty != difficulty:
+    st.session_state.secret = random.randint(low, high)
+    st.session_state.attempts = 0
+    st.session_state.score = 0
+    st.session_state.status = "playing"
+    st.session_state.history = []
+    st.session_state.difficulty = difficulty
+
+#FIXME:The attempts number was weird and one off. 
 if "attempts" not in st.session_state:
-    st.session_state.attempts = 1
+    st.session_state.attempts = 0
 
 if "score" not in st.session_state:
     st.session_state.score = 0
@@ -104,10 +71,27 @@ if "status" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
+st.sidebar.subheader("Guess History")
+
+valid_guesses = [h for h in st.session_state.history if h.get("valid")]
+
+if not valid_guesses:
+    st.sidebar.caption("No guesses yet.")
+else:
+    # Show most recent first 
+    for i, h in enumerate(reversed(valid_guesses), start=1):
+        g = h["guess"]
+        diff = abs(g - st.session_state.secret)
+        icon = closeness_emoji(diff)
+
+        # Guess if off by
+        st.sidebar.write(f"{icon} Guess {g} (off by {diff})")
+
 st.subheader("Make a guess")
 
+##FIXME: The range isn't always 1 to 100. Change it to low to high. 
 st.info(
-    f"Guess a number between 1 and 100. "
+    f"Guess a number between {low} and {high}. "
     f"Attempts left: {attempt_limit - st.session_state.attempts}"
 )
 
@@ -118,9 +102,10 @@ with st.expander("Developer Debug Info"):
     st.write("Difficulty:", difficulty)
     st.write("History:", st.session_state.history)
 
+#FIXME: Switching Difficulty doesn't reset the game. Add a new game button to reset the game when changing difficulty.
 raw_guess = st.text_input(
     "Enter your guess:",
-    key=f"guess_input_{difficulty}"
+    key="guess_input"
 )
 
 col1, col2, col3 = st.columns(3)
@@ -131,9 +116,13 @@ with col2:
 with col3:
     show_hint = st.checkbox("Show hint", value=True)
 
+#FIXME: Change the range from low to high instead of hardcoding it to 1 to 100
+# I also added a playing status check to prevent playing after winning or losing until a new game is started.
 if new_game:
     st.session_state.attempts = 0
-    st.session_state.secret = random.randint(1, 100)
+    st.session_state.secret = random.randint(low, high)
+    st.session_state.status = "playing"
+    st.session_state.history = []
     st.success("New game started.")
     st.rerun()
 
@@ -145,25 +134,30 @@ if st.session_state.status != "playing":
     st.stop()
 
 if submit:
-    st.session_state.attempts += 1
+    ##FIXME: Take out the increment of attempts from the top and put it here so that it only increments when a guess is submitted. 
+    ## st.session_state.attempts += 1
 
     ok, guess_int, err = parse_guess(raw_guess)
 
     if not ok:
-        st.session_state.history.append(raw_guess)
+        st.session_state.history.append({"raw": raw_guess, "valid": False})
         st.error(err)
     else:
-        st.session_state.history.append(guess_int)
+        st.session_state.attempts += 1
+        st.session_state.history.append({"raw": raw_guess, "guess": guess_int, "valid": True})
 
-        if st.session_state.attempts % 2 == 0:
-            secret = str(st.session_state.secret)
-        else:
-            secret = st.session_state.secret
-
+        secret = st.session_state.secret
         outcome, message = check_guess(guess_int, secret)
 
+        temp = hot_cold_label(guess_int, secret)
+
         if show_hint:
-            st.warning(message)
+            if outcome == "Too High":
+                st.error(f"{message}  {temp}")
+            elif outcome == "Too Low":
+                st.info(f"{message}  {temp}")
+            else:
+                st.success(f"{message}  {temp}")
 
         st.session_state.score = update_score(
             current_score=st.session_state.score,
